@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "MasterClassCharacter.h"
 #include "Engine/LocalPlayer.h"
@@ -10,6 +10,7 @@
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputActionValue.h"
+#include "Engine/DamageEvents.h"
 
 DEFINE_LOG_CATEGORY(LogTemplateCharacter);
 
@@ -52,6 +53,28 @@ AMasterClassCharacter::AMasterClassCharacter()
 
 	// Note: The skeletal mesh and anim blueprint references on the Mesh component (inherited from Character) 
 	// are set in the derived blueprint asset named ThirdPersonCharacter (to avoid direct content references in C++)
+}
+
+float AMasterClassCharacter::TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent, AController* EventInstigator, AActor* DamageCauser)
+{
+	const float ActualDamage = Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
+
+	const UDamageType* DT2 = DamageEvent.DamageTypeClass->GetDefaultObject<UDamageType>();
+
+	if (DT2 && DT2->bCausedByWorld)
+	{
+		// 월드 데미지(낙사, 트랩 등)일 경우 특별 처리 (예: 비명 소리 다르게 재생)
+		UE_LOG(LogTemp, Warning, TEXT("Environmental Damage Received!"));
+	}
+
+	if (EventInstigator)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("I'M Enemy!"));
+		// 일반적인 적의 공격인 경우 타겟팅 로직 실행
+	}
+
+	//다른곳에서 혹시나 쓸 수도 있으니 값을 
+	return ActualDamage;
 }
 
 //////////////////////////////////////////////////////////////////////////
