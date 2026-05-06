@@ -84,3 +84,7 @@ DerivedDataCache/*
 
 # Prerequisites
 *.d
+
+# Jetbrain Rider
+.idea/
+*.DotSettings.user  
