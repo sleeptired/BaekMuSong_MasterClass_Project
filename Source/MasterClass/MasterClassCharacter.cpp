@@ -19,16 +19,17 @@ DEFINE_LOG_CATEGORY(LogTemplateCharacter);
 
 AMasterClassCharacter::AMasterClassCharacter()
 {
+	PrimaryActorTick.bCanEverTick = true;
 	// Set size for collision capsule
 	GetCapsuleComponent()->InitCapsuleSize(42.f, 96.0f);
-		
+
 	// Don't rotate when the controller rotates. Let that just affect the camera.
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationYaw = false;
 	bUseControllerRotationRoll = false;
 
 	// Configure character movement
-	GetCharacterMovement()->bOrientRotationToMovement = true; // Character moves in the direction of input...	
+	GetCharacterMovement()->bOrientRotationToMovement = true; // Character moves in the direction of input...
 	GetCharacterMovement()->RotationRate = FRotator(0.0f, 500.0f, 0.0f); // ...at this rotation rate
 
 	// Note: For faster iteration times these variables, and many more, can be tweaked in the Character Blueprint
@@ -43,7 +44,7 @@ AMasterClassCharacter::AMasterClassCharacter()
 	// Create a camera boom (pulls in towards the player if there is a collision)
 	CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
 	CameraBoom->SetupAttachment(RootComponent);
-	CameraBoom->TargetArmLength = 400.0f; // The camera follows at this distance behind the character	
+	CameraBoom->TargetArmLength = 400.0f; // The camera follows at this distance behind the character
 	CameraBoom->bUsePawnControlRotation = true; // Rotate the arm based on the controller
 
 	// Create a follow camera
@@ -51,8 +52,13 @@ AMasterClassCharacter::AMasterClassCharacter()
 	FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName); // Attach the camera to the end of the boom and let the boom adjust to match the controller orientation
 	FollowCamera->bUsePawnControlRotation = false; // Camera does not rotate relative to arm
 
-	// Note: The skeletal mesh and anim blueprint references on the Mesh component (inherited from Character) 
+	// Note: The skeletal mesh and anim blueprint references on the Mesh component (inherited from Character)
 	// are set in the derived blueprint asset named ThirdPersonCharacter (to avoid direct content references in C++)
+
+	bIsAiming = false;
+	DefaultFOV = 90.0f;//수정예정
+	ZoomedFOV = 55.0f;
+	ZoomInterpSpeed = 15.0f;
 }
 
 float AMasterClassCharacter::TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent, AController* EventInstigator, AActor* DamageCauser)
@@ -73,8 +79,33 @@ float AMasterClassCharacter::TakeDamage(float DamageAmount, FDamageEvent const& 
 		// 일반적인 적의 공격인 경우 타겟팅 로직 실행
 	}
 
-	//다른곳에서 혹시나 쓸 수도 있으니 값을 
+	//다른곳에서 혹시나 쓸 수도 있으니 값을
 	return ActualDamage;
+}
+
+void AMasterClassCharacter::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+
+	if (FollowCamera)
+	{
+		// 목표 시야각 설정
+		float TargetFOV = bIsAiming ? ZoomedFOV : DefaultFOV;
+		float CurrentFOV = FollowCamera->FieldOfView;
+		float NewFOV = FMath::FInterpTo(CurrentFOV, TargetFOV, DeltaTime, ZoomInterpSpeed);
+		FollowCamera->SetFieldOfView(NewFOV);
+	}
+
+	if (CameraBoom)
+	{
+		float TargetArmLength = bIsAiming ? 0.0f : 400.0f;
+		float CurrentArmLength = CameraBoom->TargetArmLength;
+		CameraBoom->TargetArmLength = FMath::FInterpTo(CurrentArmLength, TargetArmLength, DeltaTime, ZoomInterpSpeed);
+
+		FVector TargetOffset = bIsAiming ? FVector(40.f, 0.f, 60.f) : FVector(0.f, 0.f, 0.f);
+		FVector CurrentOffset = CameraBoom->SocketOffset;
+		CameraBoom->SocketOffset = FMath::VInterpTo(CurrentOffset, TargetOffset, DeltaTime, ZoomInterpSpeed);
+	}
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -98,7 +129,7 @@ void AMasterClassCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInp
 {
 	// Set up action bindings
 	if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(PlayerInputComponent)) {
-		
+
 		// Jumping
 		EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Started, this, &ACharacter::Jump);
 		EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Completed, this, &ACharacter::StopJumping);
@@ -108,6 +139,11 @@ void AMasterClassCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInp
 
 		// Looking
 		EnhancedInputComponent->BindAction(LookAction, ETriggerEvent::Triggered, this, &AMasterClassCharacter::Look);
+
+		// Started: 우클릭을 누르는 순간 / Completed: 우클릭을 떼는 순간
+		EnhancedInputComponent->BindAction(AimAction, ETriggerEvent::Started, this, &AMasterClassCharacter::StartAiming);
+		EnhancedInputComponent->BindAction(AimAction, ETriggerEvent::Completed, this, &AMasterClassCharacter::StopAiming);
+
 	}
 	else
 	{
@@ -128,11 +164,11 @@ void AMasterClassCharacter::Move(const FInputActionValue& Value)
 
 		// get forward vector
 		const FVector ForwardDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
-	
-		// get right vector 
+
+		// get right vector
 		const FVector RightDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
 
-		// add movement 
+		// add movement
 		AddMovementInput(ForwardDirection, MovementVector.Y);
 		AddMovementInput(RightDirection, MovementVector.X);
 	}
@@ -149,4 +185,18 @@ void AMasterClassCharacter::Look(const FInputActionValue& Value)
 		AddControllerYawInput(LookAxisVector.X);
 		AddControllerPitchInput(LookAxisVector.Y);
 	}
+}
+
+void AMasterClassCharacter::StartAiming()
+{
+	bIsAiming = true;
+	// 조준 시 이동 속도 감소
+	GetCharacterMovement()->MaxWalkSpeed = 250.0f;
+}
+
+void AMasterClassCharacter::StopAiming()
+{
+	bIsAiming = false;
+	// 조준 해제 시 이동 속도로 복구
+	GetCharacterMovement()->MaxWalkSpeed = 500.0f;
 }
